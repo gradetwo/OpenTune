@@ -437,6 +437,57 @@ AutoTunePitchShifter::shiftChunkWithOctaveRepair(
                 && m.maxErrorCents <= kSourceOctaveGateCents);
     };
 
+    // Detector-glitch neutralization: a detector period whose requested
+    // rate is outside the source-octave gate at octave -1, 0 and +1 is not
+    // an octave error. No octave scaling in the repair's repertoire can
+    // legalize it, so it is a short sub-multiple / transient lock of the
+    // kind the detector produces at low-F0 note onsets and tails (measured:
+    // period 80.9 samples against a 397-sample true period at 111 Hz,
+    // rate -2774 cents; period 20.2 samples, rate -4972 cents). Leaving
+    // such a sample in place makes the candidate legality check fail for
+    // every octave, so the chunk fails with empty audio even though the
+    // render is otherwise in contract. Replace the unusable period with
+    // the F0-track period (sampleRate / originalF0), the same source the
+    // shifter uses when there is no detector at all: the F0 track agrees
+    // with the corrected target within the light contract at these
+    // samples (measured within +/-40 cents), so the replaced rate lands
+    // inside it. When the F0 track carries no period either, mark the
+    // sample invalid and let the shifter stay neutral there. Genuine
+    // octave errors (within the gate of octave -1, 0 or +1) and boundary
+    // jitter (within the gate of octave 0) are left untouched, so the
+    // octave repair and the 0004 behaviour are unchanged for them. The
+    // gate itself is not widened: a rate thousands of cents out is not a
+    // wider gate's business.
+    std::vector<AutoTunePeriodDetector::DetectedPeriod> sanitizedPeriods(
+        detectorPeriods, detectorPeriods + numDetectorSamples);
+    for (int i = 0; i < numSamples; ++i) {
+        auto& det = sanitizedPeriods[static_cast<size_t>(i)];
+        if (!det.valid || !(correctedAt(i) > 0.0))
+            continue;
+        const double rateCents =
+            1200.0 * std::log2(rateAt(i, sanitizedPeriods.data()));
+        bool repairable = false;
+        for (int k = -1; k <= 1; ++k) {
+            if (std::fabs(rateCents - 1200.0 * k) <= kSourceOctaveGateCents) {
+                repairable = true;
+                break;
+            }
+        }
+        if (repairable)
+            continue;
+        const double original =
+            static_cast<double>(originalF0[frameAt(i)]);
+        if (original > 0.0)
+            det.periodSamples =
+                static_cast<float>(sampleRate_ / original);
+        else
+            det.valid = false;
+    }
+    // Everything downstream (baseline render, anomaly scan, spans,
+    // candidate legality) works on the sanitized shadow; the caller's
+    // detector array is never modified.
+    detectorPeriods = sanitizedPeriods.data();
+
     const auto baselineAudio = render(detectorPeriods);
     const Metrics baselineMetrics = measure(baselineAudio);
 

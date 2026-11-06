@@ -1840,6 +1840,129 @@ void testOctaveRepairScalesHalfPeriod()
                "octave P/2: output is ~220 Hz");
 }
 
+// Detector locked onto a short sub-multiple period (P/5): period 40 is
+// ~1/5 of the 200.5-sample true period of a 220 Hz tone, rate -2788
+// cents. No octave scaling can legalize it, so without neutralization
+// every octave candidate is illegal and the chunk fails with empty audio.
+// Repair must neutralize the glitch period with the F0-track period and
+// render the 220 Hz target at octave 0.
+void testOctaveRepairNeutralizesSubMultiplePeriod()
+{
+    constexpr int kSampleRate = 44100;
+    constexpr int kNumSamples = 8192;
+    const Shifter::OctaveRepairResult result =
+        runFixedToneOctaveRepair(40.0f);
+
+    expectTrue(result.success, "sub-multiple P/5: repair succeeds");
+    expectTrue(result.octave == 0,
+               "sub-multiple P/5: no octave scaling is applied");
+    expectTrue(static_cast<int>(result.audio.size()) == kNumSamples,
+               "sub-multiple P/5: output length preserved");
+    expectTrue(allFinite(result.audio), "sub-multiple P/5: output finite");
+    if (static_cast<int>(result.audio.size()) != kNumSamples)
+        return;
+
+    constexpr int kBegin = 2048;
+    constexpr int kEnd = kNumSamples;
+    const int crossings =
+        countPositiveZeroCrossings(result.audio, kBegin, kEnd);
+    const double duration = static_cast<double>(kEnd - kBegin) / kSampleRate;
+    const double expected = 220.0 * duration;
+    expectTrue(std::fabs(static_cast<double>(crossings) - expected)
+                   < expected * 0.1,
+               "sub-multiple P/5: output is ~220 Hz");
+}
+
+// Same shape one decade further out: period 20 is ~P/10, rate -3988
+// cents. Also unfixable by any octave scaling; must neutralize the same
+// way. This is the Lindong 20.2-sample lock (rate -4972 cents) in
+// miniature.
+void testOctaveRepairNeutralizesTenthPeriod()
+{
+    constexpr int kSampleRate = 44100;
+    constexpr int kNumSamples = 8192;
+    const Shifter::OctaveRepairResult result =
+        runFixedToneOctaveRepair(20.0f);
+
+    expectTrue(result.success, "sub-multiple P/10: repair succeeds");
+    expectTrue(result.octave == 0,
+               "sub-multiple P/10: no octave scaling is applied");
+    expectTrue(static_cast<int>(result.audio.size()) == kNumSamples,
+               "sub-multiple P/10: output length preserved");
+    expectTrue(allFinite(result.audio), "sub-multiple P/10: output finite");
+    if (static_cast<int>(result.audio.size()) != kNumSamples)
+        return;
+
+    constexpr int kBegin = 2048;
+    constexpr int kEnd = kNumSamples;
+    const int crossings =
+        countPositiveZeroCrossings(result.audio, kBegin, kEnd);
+    const double duration = static_cast<double>(kEnd - kBegin) / kSampleRate;
+    const double expected = 220.0 * duration;
+    expectTrue(std::fabs(static_cast<double>(crossings) - expected)
+                   < expected * 0.1,
+               "sub-multiple P/10: output is ~220 Hz");
+}
+
+Shifter::OctaveRepairResult runMixedPeriodOctaveRepair(
+    float firstPeriod, float secondPeriod)
+{
+    constexpr int kSampleRate = 44100;
+    constexpr int kNumSamples = 8192;
+    constexpr int kHalf = kNumSamples / 2;
+    constexpr int kHistorySamples = 256;
+    constexpr double kFreq = 220.0;
+
+    const std::vector<float> input = makeSineSegment(
+        kFreq, kSampleRate, 0, kNumSamples, 0.5);
+    const std::vector<float> history = makeSineSegment(
+        kFreq, kSampleRate, -kHistorySamples, kHistorySamples, 0.5);
+    const std::vector<float> tail = makeSineSegment(
+        kFreq, kSampleRate, kNumSamples, Shifter::kLookaheadSamples, 0.5);
+    auto detected = makeLockedDetector(kNumSamples, firstPeriod);
+    for (int i = kHalf; i < kNumSamples; ++i)
+        detected[static_cast<size_t>(i)].periodSamples = secondPeriod;
+
+    const float f0 = static_cast<float>(kFreq);
+    Shifter shifter(static_cast<double>(kSampleRate));
+    return shifter.shiftChunkWithOctaveRepair(
+        input.data(), kNumSamples, &f0, &f0, 1, 100.0, 0.0,
+        tail.data(), Shifter::kLookaheadSamples,
+        history.data(), kHistorySamples,
+        detected.data(), kNumSamples, false);
+}
+
+// Lindong shape in miniature: the first half of the chunk carries the
+// correct detector period and the second half carries a P/5 glitch lock.
+// The glitch span must be neutralized, not repaired by octave scaling,
+// and the whole chunk must render at 220 Hz.
+void testOctaveRepairNeutralizesGlitchSpan()
+{
+    constexpr int kSampleRate = 44100;
+    constexpr int kNumSamples = 8192;
+    const Shifter::OctaveRepairResult result =
+        runMixedPeriodOctaveRepair(200.0f, 40.0f);
+
+    expectTrue(result.success, "glitch span: repair succeeds");
+    expectTrue(result.octave == 0,
+               "glitch span: no octave scaling is applied");
+    expectTrue(static_cast<int>(result.audio.size()) == kNumSamples,
+               "glitch span: output length preserved");
+    expectTrue(allFinite(result.audio), "glitch span: output finite");
+    if (static_cast<int>(result.audio.size()) != kNumSamples)
+        return;
+
+    constexpr int kBegin = 2048;
+    constexpr int kEnd = kNumSamples;
+    const int crossings =
+        countPositiveZeroCrossings(result.audio, kBegin, kEnd);
+    const double duration = static_cast<double>(kEnd - kBegin) / kSampleRate;
+    const double expected = 220.0 * duration;
+    expectTrue(std::fabs(static_cast<double>(crossings) - expected)
+                   < expected * 0.1,
+               "glitch span: output is ~220 Hz in both halves");
+}
+
 // A genuine 220 -> 440 Hz transposition with a stale detector period in the
 // second half. Repair must scale only the second-half span: the first half
 // stays at 220 Hz and the second half stays at 440 Hz. Scaling the whole
@@ -2023,6 +2146,9 @@ int main()
     testPitchShiftRateContractAt75Cents();
     testOctaveRepairScalesDoublePeriod();
     testOctaveRepairScalesHalfPeriod();
+    testOctaveRepairNeutralizesSubMultiplePeriod();
+    testOctaveRepairNeutralizesTenthPeriod();
+    testOctaveRepairNeutralizesGlitchSpan();
     testOctaveRepairPreservesRealTransposition();
     testOctaveRepairRejectsUnreachableTarget();
     testLightPitchRoutingBounds();
