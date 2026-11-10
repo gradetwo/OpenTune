@@ -9,6 +9,8 @@
 #include <dml_provider_factory.h>
 #endif
 
+#include "../Inference/OnnxRuntimeProviderCompat.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -104,6 +106,32 @@ bool tryAppendDml(Ort::SessionOptions& options)
 #endif
 }
 
+bool tryAppendCuda(Ort::SessionOptions& options)
+{
+#if defined(__linux__)
+    if (AccelerationDetector::getInstance().getSelection().backend
+        != AccelerationDetector::AccelBackend::CUDA)
+        return false;
+
+    const int deviceIndex = AccelerationDetector::getInstance()
+        .getSelection().cudaDeviceIndex;
+    try
+    {
+        appendCudaExecutionProvider(options, deviceIndex);
+    }
+    catch (const std::exception& e)
+    {
+        AppLogger::warn("[HNSEP] CUDA EP append failed: " + juce::String(e.what()));
+        return false;
+    }
+    AppLogger::info("[HNSEP] ONNX session using CUDA device " + juce::String(deviceIndex));
+    return true;
+#else
+    juce::ignoreUnused(options);
+    return false;
+#endif
+}
+
 std::unique_ptr<Ort::Session> createSession(const std::string& modelPath,
                                              Ort::Env& env,
                                              Ort::SessionOptions& options)
@@ -186,9 +214,10 @@ bool runHNSEPOnnx(const float* dryAudio,
 
     static std::atomic<bool> cudaGuidanceLogged{false};
     if (!cudaGuidanceLogged.exchange(true, std::memory_order_acq_rel))
-        AppLogger::warn("[HNSEP] CUDA-specific HEURISTIC/use_tf32=0 settings cannot apply: "
-            "the bundled ONNX Runtime has no CUDA EP; using the existing DirectML provider "
-            "on Windows or CPU fallback, with sequential single-thread execution");
+        AppLogger::info("[HNSEP] CUDA-specific HEURISTIC/use_tf32=0 settings: "
+            "the CUDA path uses cudnn_conv_algo_search=HEURISTIC when the NVIDIA "
+            "driver is present; otherwise DirectML (Windows) or CPU is used, "
+            "with sequential single-thread execution");
 
     const juce::File modelFile = juce::File(juce::String(modelsDir))
         .getChildFile("hnsep.onnx");
@@ -204,7 +233,8 @@ bool runHNSEPOnnx(const float* dryAudio,
     {
         auto options = makeSessionOptions();
         const bool dmlAdded = tryAppendDml(options);
-        if (!dmlAdded)
+        const bool cudaAdded = dmlAdded ? false : tryAppendCuda(options);
+        if (!dmlAdded && !cudaAdded)
             AppLogger::info("[HNSEP] ONNX session using CPU provider");
 
         std::unique_ptr<Ort::Session> session;
@@ -214,9 +244,9 @@ bool runHNSEPOnnx(const float* dryAudio,
         }
         catch (const std::exception& e)
         {
-            if (!dmlAdded)
+            if (!dmlAdded && !cudaAdded)
                 throw;
-            AppLogger::warn("[HNSEP] DirectML session creation failed; retrying on CPU: "
+            AppLogger::warn("[HNSEP] GPU session creation failed; retrying on CPU: "
                 + juce::String(e.what()));
             auto cpuOptions = makeSessionOptions();
             session = createSession(modelFile.getFullPathName().toStdString(), env, cpuOptions);

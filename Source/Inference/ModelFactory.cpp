@@ -75,6 +75,8 @@ ModelFactory::F0ExtractorResult ModelFactory::createF0Extractor(
             gpuMode ? "DirectML" : "CPU";
 #elif defined(__APPLE__)
             gpuMode ? "CoreML" : "CPU";
+#elif defined(__linux__)
+            gpuMode ? "CUDA" : "CPU";
 #else
             "CPU";
 #endif
@@ -228,6 +230,22 @@ Ort::SessionOptions ModelFactory::createF0SessionOptions(
             + juce::String(coreMlProviderDescription()) + ", computeUnits=ALL)");
         } catch (const std::exception& e) {
             AppLogger::warn(juce::String("[ModelFactory] Failed to add CoreML EP for F0: ") + e.what());
+            AppLogger::info("[ModelFactory] F0 session: falling back to CPU");
+            AccelerationDetector::getInstance().overrideBackend(AccelerationDetector::AccelBackend::CPU);
+        }
+    }
+#endif
+
+#if defined(__linux__)
+    const auto backendSelection = AccelerationDetector::getInstance().getSelection();
+    if (!forceCpu && backendSelection.backend == AccelerationDetector::AccelBackend::CUDA) {
+        try {
+            appendCudaExecutionProvider(sessionOptions, backendSelection.cudaDeviceIndex);
+            gpuMode = true;
+            AppLogger::info("[ModelFactory] F0 session: CUDA EP added (device "
+                + juce::String(backendSelection.cudaDeviceIndex) + ", cudnn_conv_algo_search=HEURISTIC)");
+        } catch (const std::exception& e) {
+            AppLogger::warn(juce::String("[ModelFactory] Failed to add CUDA EP for F0: ") + e.what());
             AppLogger::info("[ModelFactory] F0 session: falling back to CPU");
             AccelerationDetector::getInstance().overrideBackend(AccelerationDetector::AccelBackend::CPU);
         }

@@ -39,6 +39,7 @@ public:
             const char* backendName = "CPU";
             if (currentBackend_ == VocoderBackend::DML) backendName = "DML";
             else if (currentBackend_ == VocoderBackend::CoreML) backendName = "CoreML";
+            else if (currentBackend_ == VocoderBackend::CUDA) backendName = "CUDA";
             AppLogger::info("[VocoderInferenceService] Initialized with vocoder ("
                 + juce::String(backendName) + ")");
             return true;

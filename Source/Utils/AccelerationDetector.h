@@ -6,9 +6,11 @@
  * 检测可用的硬件加速后端。
  * Windows: 枚举 GPU + 检查 ORT DML EP 可用性 → DirectML 或 CPU
  * macOS:   CoreML 系统框架 → CoreML 或 CPU
+ * Linux:   NVIDIA 驱动 + ORT CUDA EP 可用性 → CUDA 或 CPU
  * 
  * GPU 枚举信息（名称/VRAM/adapterIndex）用于检测日志。
  * 实际 DML 可用性由 ORT GetExecutionProviderApi("DML") 判断。
+ * 实际 CUDA 可用性由 ORT GetExecutionProviderApi("CUDA") + NVIDIA 驱动存在性判断。
  */
 
 #include <juce_core/juce_core.h>
@@ -46,12 +48,14 @@ public:
     enum class AccelBackend {
         CPU,        // 纯CPU推理
         DirectML,   // DirectML（Windows，支持所有DirectX 12 GPU）
-        CoreML      // CoreML（macOS，支持ANE/GPU/CPU自动调度）
+        CoreML,     // CoreML（macOS，支持ANE/GPU/CPU自动调度）
+        CUDA        // CUDA EP（Linux，NVIDIA GPU + 随包 ONNX Runtime CUDA provider）
     };
 
     struct BackendSelection {
         AccelBackend backend = AccelBackend::CPU;
         int dmlAdapterIndex = 0;
+        int cudaDeviceIndex = 0;    // CUDA device id（Linux）
     };
 
     /**
@@ -89,6 +93,7 @@ private:
     // 检测辅助函数
     bool detectDirectML(GpuDeviceInfo& selectedGpu, int& adapterIndex);
     bool detectCoreML();
+    bool detectCuda();
     bool enumerateGpuDevices(std::vector<GpuDeviceInfo>& gpuDevices);
 
     static const char* backendName(AccelBackend backend) noexcept;

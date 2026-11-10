@@ -11,7 +11,8 @@ namespace OpenTune {
 enum class VocoderBackend {
     CPU,
     DML,
-    CoreML
+    CoreML,
+    CUDA
 };
 
 struct VocoderCreationResult {

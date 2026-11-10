@@ -267,10 +267,32 @@ VocoderCreationResult VocoderFactory::create(
         }
 #endif
 
+#if defined(__linux__)
+        if (AccelerationDetector::getInstance().getSelection().backend
+                == AccelerationDetector::AccelBackend::CUDA) {
+            const int cudaDeviceIndex = AccelerationDetector::getInstance()
+                .getSelection().cudaDeviceIndex;
+            try {
+                appendCudaExecutionProvider(sessionOptions, cudaDeviceIndex);
+                selectedBackend = VocoderBackend::CUDA;
+                AppLogger::info("[VocoderFactory] Vocoder session: CUDA EP added (device "
+                    + juce::String(cudaDeviceIndex) + ", cudnn_conv_algo_search=HEURISTIC)");
+            } catch (const std::exception& e) {
+                backendFallbackError = "CUDA execution provider initialization failed: "
+                    + std::string(e.what());
+                AppLogger::warn(juce::String("[VocoderFactory] Failed to add CUDA EP for vocoder: ") + e.what());
+                AppLogger::info("[VocoderFactory] Vocoder session: falling back to CPU");
+                AccelerationDetector::getInstance().overrideBackend(AccelerationDetector::AccelBackend::CPU);
+            }
+        }
+#endif
+
         if (selectedBackend == VocoderBackend::CPU) {
             AppLogger::info("[VocoderFactory] Creating CPU vocoder...");
         } else {
-            AppLogger::info("[VocoderFactory] Creating CoreML vocoder...");
+            AppLogger::info("[VocoderFactory] Creating "
+                + juce::String(selectedBackend == VocoderBackend::CoreML ? "CoreML" : "CUDA")
+                + " vocoder...");
         }
 
         auto createSession = [&env, &modelPath](Ort::SessionOptions& options) {
@@ -287,11 +309,13 @@ VocoderCreationResult VocoderFactory::create(
         try {
             session = createSession(sessionOptions);
         } catch (const std::exception& e) {
-            if (selectedBackend != VocoderBackend::CoreML)
+            if (selectedBackend == VocoderBackend::CPU)
                 throw;
 
-            backendFallbackError = "CoreML session creation failed: " + std::string(e.what());
-            AppLogger::warn(juce::String("[VocoderFactory] CoreML session creation failed: ") + e.what());
+            backendFallbackError = (selectedBackend == VocoderBackend::CoreML
+                    ? "CoreML session creation failed: "
+                    : "CUDA session creation failed: ") + std::string(e.what());
+            AppLogger::warn(juce::String("[VocoderFactory] GPU session creation failed: ") + e.what());
             AppLogger::info("[VocoderFactory] Retrying vocoder with CPU");
             AccelerationDetector::getInstance().overrideBackend(AccelerationDetector::AccelBackend::CPU);
 
@@ -304,7 +328,9 @@ VocoderCreationResult VocoderFactory::create(
         
         auto vocoder = std::make_unique<PCNSFHifiGANVocoder>(std::move(session));
 
-        const juce::String backendStr = (selectedBackend == VocoderBackend::CoreML) ? "CoreML" : "CPU";
+        const juce::String backendStr =
+            selectedBackend == VocoderBackend::CoreML ? "CoreML"
+            : selectedBackend == VocoderBackend::CUDA ? "CUDA" : "CPU";
         AppLogger::info("[VocoderFactory] " + backendStr + " vocoder created successfully");
 
         applySidecarConfig(modelPath, *vocoder);
