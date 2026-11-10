@@ -42,10 +42,28 @@ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
     endif()
 endif()
 
+# Linux is a first-class build target: Standalone app + non-ARA VST3
+# (hosts without ARA binding use the Capture fallback that ships in the
+# same binary, exactly like Windows/macOS in non-ARA hosts).
+# NOTE: CMAKE_SYSTEM_NAME is only known after project(), so the actual
+# detection runs right below the project() call.
+
 # ==============================================================================
 # Project Definition
 # ==============================================================================
 project(OpenTune VERSION 1.8.2 LANGUAGES CXX C)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(OPENTUNE_LINUX TRUE)
+endif()
+
+# Linux: CUDA EP is the GPU acceleration path (NVIDIA driver + the CUDA
+# providers shipped inside the official onnxruntime-linux-x64 package).
+# Detection is done at runtime; this option only documents/controls intent
+# for the CUDA-related deployment steps below.
+include(CMakeDependentOption)
+cmake_dependent_option(OPENTUNE_ENABLE_CUDA "Enable CUDA EP support (Linux)" ON
+    "OPENTUNE_LINUX" OFF)
 
 # 为 clangd/LSP 导出编译数据库（compile_commands.json）
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -94,16 +112,30 @@ add_subdirectory("${OPENTUNE_JUCE_DIR}/modules" "${JUCE_BINARY_DIR}/modules")
 
 # ARA2 VST3 is the shipping plugin; hosts without ARA binding still use its
 # Capture fallback. Apple builds also expose a temporary ARA2 AU diagnostic.
+# ARA 2 is not available on Linux: build the same plugin without the ARA
+# extension (non-ARA VST3, Capture flow) and skip the ARA SDK dependency.
 if(NOT OPENTUNE_IOS)
-    opentune_use_juce_vst3_client_ara_legacy_bind_overlay("${OPENTUNE_JUCE_DIR}")
+    if(OPENTUNE_LINUX)
+        opentune_use_juce_vst3_client_ara_legacy_bind_overlay("${OPENTUNE_JUCE_DIR}" SKIP_ARA_PATCH)
+        message(STATUS "ARA SDK not required on Linux (non-ARA VST3, Capture fallback flow)")
+    else()
+        opentune_use_juce_vst3_client_ara_legacy_bind_overlay("${OPENTUNE_JUCE_DIR}")
 
-    if(NOT EXISTS "${ARA_SDK_PATH}")
-        message(FATAL_ERROR
-            "ARA SDK ${OPENTUNE_ARA_SDK_VERSION} is required at ${ARA_SDK_PATH}. "
-            "Clone it with: git clone --recursive --branch releases/${OPENTUNE_ARA_SDK_VERSION} https://github.com/Celemony/ARA_SDK")
+        if(NOT EXISTS "${ARA_SDK_PATH}")
+            message(FATAL_ERROR
+                "ARA SDK ${OPENTUNE_ARA_SDK_VERSION} is required at ${ARA_SDK_PATH}. "
+                "Clone it with: git clone --recursive --branch releases/${OPENTUNE_ARA_SDK_VERSION} https://github.com/Celemony/ARA_SDK")
+        endif()
+        juce_set_ara_sdk_path("${ARA_SDK_PATH}")
+        message(STATUS "ARA SDK found at: ${ARA_SDK_PATH} (ARA2 plugin support enabled)")
     endif()
-    juce_set_ara_sdk_path("${ARA_SDK_PATH}")
-    message(STATUS "ARA SDK found at: ${ARA_SDK_PATH} (ARA2 plugin support enabled)")
+endif()
+
+# Whether the VST3 product embeds the ARA2 extension.
+if(OPENTUNE_LINUX)
+    set(OPENTUNE_VST3_IS_ARA_EFFECT FALSE)
+else()
+    set(OPENTUNE_VST3_IS_ARA_EFFECT TRUE)
 endif()
 
 # ==============================================================================
@@ -301,8 +333,35 @@ elseif(APPLE)
             CACHE PATH "ONNX Runtime root directory" FORCE)
     endif()
 
+elseif(OPENTUNE_LINUX)
+    # ---- Linux: official ONNX Runtime linux-x64 shared package ----
+    # The official onnxruntime-linux-x64 package ships the CUDA providers
+    # (libonnxruntime_providers_cuda.so) next to the core runtime; the CUDA
+    # runtime itself (CUDA/cuDNN userland) is provided by the host NVIDIA
+    # driver stack and is detected at runtime, with automatic CPU fallback.
+    set(OPENTUNE_ONNXRUNTIME_VERSION "1.24.4")
+
+    set(OPENTUNE_DEFAULT_ONNXRUNTIME_ROOT
+        "${OPENTUNE_THIRDPARTY_DIR}/onnxruntime-linux-x64-gpu-${OPENTUNE_ONNXRUNTIME_VERSION}")
+    if(NOT DEFINED ONNXRUNTIME_ROOT OR "${ONNXRUNTIME_ROOT}" STREQUAL "")
+        set(ONNXRUNTIME_ROOT "${OPENTUNE_DEFAULT_ONNXRUNTIME_ROOT}"
+            CACHE PATH "ONNX Runtime root directory" FORCE)
+    elseif(NOT EXISTS "${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so.${OPENTUNE_ONNXRUNTIME_VERSION}"
+           AND EXISTS "${OPENTUNE_DEFAULT_ONNXRUNTIME_ROOT}/lib/libonnxruntime.so.${OPENTUNE_ONNXRUNTIME_VERSION}")
+        message(STATUS "ONNXRUNTIME_ROOT reset to pinned ORT ${OPENTUNE_ONNXRUNTIME_VERSION}: ${OPENTUNE_DEFAULT_ONNXRUNTIME_ROOT}")
+        set(ONNXRUNTIME_ROOT "${OPENTUNE_DEFAULT_ONNXRUNTIME_ROOT}"
+            CACHE PATH "ONNX Runtime root directory" FORCE)
+    endif()
+
+    set(ONNXRUNTIME_SHARED_LIB
+        "${ONNXRUNTIME_ROOT}/lib/libonnxruntime.so.${OPENTUNE_ONNXRUNTIME_VERSION}")
+    set(ONNXRUNTIME_PROVIDERS_SHARED
+        "${ONNXRUNTIME_ROOT}/lib/libonnxruntime_providers_shared.so")
+    set(ONNXRUNTIME_PROVIDERS_CUDA
+        "${ONNXRUNTIME_ROOT}/lib/libonnxruntime_providers_cuda.so")
+
 else()
-    message(FATAL_ERROR "Unsupported platform. Only Windows, macOS and iPadOS are supported.")
+    message(FATAL_ERROR "Unsupported platform. Only Windows, macOS, iPadOS and Linux are supported.")
 endif()
 set(ONNXRUNTIME_INCLUDE_DIR "${ONNXRUNTIME_ROOT}/include")
 set(ONNXRUNTIME_LIB_DIR "${ONNXRUNTIME_ROOT}/lib")
@@ -399,6 +458,34 @@ elseif(APPLE)
     message(STATUS "ONNX Runtime version: ${OPENTUNE_ONNXRUNTIME_VERSION} (macOS ${CMAKE_OSX_ARCHITECTURES})")
     message(STATUS "ONNX Runtime root: ${ONNXRUNTIME_ROOT}")
     message(STATUS "ONNX Runtime dylib: ${ONNXRUNTIME_DYLIB}")
+
+elseif(OPENTUNE_LINUX)
+    if(NOT EXISTS "${ONNXRUNTIME_SHARED_LIB}")
+        message(FATAL_ERROR
+            "ONNX Runtime shared library not found at ${ONNXRUNTIME_SHARED_LIB}. "
+            "Download onnxruntime-linux-x64-gpu-${OPENTUNE_ONNXRUNTIME_VERSION}.tgz from "
+            "https://github.com/microsoft/onnxruntime/releases/tag/v${OPENTUNE_ONNXRUNTIME_VERSION} "
+            "and extract it to ${OPENTUNE_DEFAULT_ONNXRUNTIME_ROOT}.")
+    endif()
+
+    message(STATUS "ONNX Runtime version: ${OPENTUNE_ONNXRUNTIME_VERSION} (Linux x64)")
+    message(STATUS "ONNX Runtime root: ${ONNXRUNTIME_ROOT}")
+    message(STATUS "ONNX Runtime shared lib: ${ONNXRUNTIME_SHARED_LIB}")
+
+    if(OPENTUNE_ENABLE_CUDA)
+        if(EXISTS "${ONNXRUNTIME_PROVIDERS_CUDA}")
+            set(OPENTUNE_CUDA_PROVIDERS_BUNDLED TRUE)
+            message(STATUS "CUDA EP: enabled (providers found at ${ONNXRUNTIME_PROVIDERS_CUDA}; host needs NVIDIA driver + CUDA/cuDNN runtime, CPU fallback is automatic)")
+        else()
+            set(OPENTUNE_CUDA_PROVIDERS_BUNDLED FALSE)
+            message(WARNING
+                "OPENTUNE_ENABLE_CUDA is ON but libonnxruntime_providers_cuda.so was not found in "
+                "${ONNXRUNTIME_ROOT}/lib. The build continues; runtime falls back to CPU.")
+        endif()
+    else()
+        set(OPENTUNE_CUDA_PROVIDERS_BUNDLED FALSE)
+        message(STATUS "CUDA EP: disabled (OPENTUNE_ENABLE_CUDA=OFF)")
+    endif()
 endif()
 
 # ==============================================================================
@@ -459,7 +546,7 @@ else()
 juce_add_plugin(OpenTune
     ${OPENTUNE_PLUGIN_COMMON_ARGS}
     FORMATS VST3
-    IS_ARA_EFFECT TRUE
+    IS_ARA_EFFECT ${OPENTUNE_VST3_IS_ARA_EFFECT}
     ARA_TRANSFORMATION_FLAGS kARAPlaybackTransformationNoChanges
     PLIST_TO_MERGE
     "<plist version=\"1.0\">
@@ -1023,7 +1110,7 @@ set(OPENTUNE_ARA_SOURCES
     Source/ARA/OpenTunePlaybackRenderer.cpp
     Source/ARA/OpenTunePlaybackRenderer.h
 )
-if(NOT OPENTUNE_IOS)
+if(NOT OPENTUNE_IOS AND NOT OPENTUNE_LINUX)
     target_sources(OpenTune PRIVATE ${OPENTUNE_ARA_SOURCES})
 endif()
 if(OPENTUNE_MACOS)
@@ -1176,6 +1263,12 @@ foreach(_opentune_target IN LISTS OPENTUNE_SHARED_CODE_TARGETS)
     elseif(APPLE)
         target_link_libraries(${_opentune_target} PRIVATE "${ONNXRUNTIME_DYLIB}")
         target_link_libraries(${_opentune_target} PRIVATE "-framework Accelerate")
+    elseif(OPENTUNE_LINUX)
+        # Link the versioned shared lib by full path; the SONAME chain
+        # (libonnxruntime.so.1 -> libonnxruntime.so.1.24.4) is resolved via
+        # the $ORIGIN rpath pointing at the deployed bundle location.
+        target_link_libraries(${_opentune_target} PRIVATE "${ONNXRUNTIME_SHARED_LIB}")
+        target_include_directories(${_opentune_target} PRIVATE "${ONNXRUNTIME_ROOT}/include")
     endif()
 endforeach()
 
@@ -1238,6 +1331,12 @@ if(WIN32)
     target_compile_definitions(OpenTune PRIVATE JUCE_USE_WINDOWS_MEDIA_FORMAT=0)
 endif()
 
+if(OPENTUNE_LINUX)
+    # Standalone needs an audio backend; the plugin never owns audio devices.
+    target_compile_definitions(OpenTuneStandalone PUBLIC JUCE_ALSA=1 JUCE_JACK=0)
+    target_compile_definitions(OpenTune PUBLIC JUCE_ALSA=0 JUCE_JACK=0)
+endif()
+
 # ==============================================================================
 # Platform-specific Settings
 # ==============================================================================
@@ -1293,6 +1392,33 @@ elseif(APPLE)
             MACOSX_PACKAGE_LOCATION "Resources/docs"
         )
         target_sources(OpenTuneStandalone_Standalone PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/userguide/UserGuide.html")
+    endif()
+elseif(OPENTUNE_LINUX)
+    foreach(_opentune_target IN LISTS OPENTUNE_SHARED_CODE_TARGETS)
+        target_compile_options(${_opentune_target} PRIVATE -Wall -Wno-unused-parameter)
+    endforeach()
+
+    # Product-specific Info.plist metadata is injected by each juce_add_plugin
+    # declaration above; no second pass is needed here.
+
+    # Deployed layout: the plugin/app locate libonnxruntime.so.1.24.4 next to
+    # themselves (VST3 bundle Contents/x86_64-linux, Standalone exe dir).
+    set_target_properties(OpenTuneStandalone_Standalone PROPERTIES
+        BUILD_RPATH "$ORIGIN"
+        INSTALL_RPATH "$ORIGIN"
+    )
+    set_target_properties(OpenTune_VST3 PROPERTIES
+        BUILD_RPATH "$ORIGIN"
+        INSTALL_RPATH "$ORIGIN"
+    )
+
+    # AVX2 仅对 SIMD 热点文件开启（与 Windows /arch:AVX2 对齐），仅在 x86_64 上启用
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64)")
+        set_source_files_properties(
+            Source/Utils/SimdAccelerator.cpp
+            Source/DSP/MelSpectrogram.cpp
+            PROPERTIES COMPILE_OPTIONS "-mavx2"
+        )
     endif()
 endif()
 
@@ -1433,6 +1559,54 @@ elseif(APPLE)
             "${OPENTUNE_DEMO_AUDIO}"
             "$<TARGET_BUNDLE_DIR:OpenTuneStandalone_Standalone>/Contents/Resources/Demo/Demo.wav"
         COMMENT "Copying the demo project to macOS app bundle Resources..."
+    )
+
+elseif(OPENTUNE_LINUX)
+    # Flat layout: ORT shared libs, CUDA providers, models and demo live
+    # next to the executable (ModelPathResolver: <exe dir>/models).
+    add_custom_command(TARGET OpenTuneStandalone_Standalone POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:OpenTuneStandalone_Standalone>/models"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNXRUNTIME_SHARED_LIB}"
+            "$<TARGET_FILE_DIR:OpenTuneStandalone_Standalone>/libonnxruntime.so.${OPENTUNE_ONNXRUNTIME_VERSION}"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNXRUNTIME_PROVIDERS_SHARED}"
+            "$<TARGET_FILE_DIR:OpenTuneStandalone_Standalone>/"
+        COMMENT "Copying ONNX Runtime shared libraries to Standalone..."
+    )
+
+    if(OPENTUNE_CUDA_PROVIDERS_BUNDLED)
+        add_custom_command(TARGET OpenTuneStandalone_Standalone POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${ONNXRUNTIME_PROVIDERS_CUDA}"
+                "$<TARGET_FILE_DIR:OpenTuneStandalone_Standalone>/"
+            COMMENT "Copying ONNX Runtime CUDA provider to Standalone..."
+        )
+    endif()
+
+    add_custom_command(TARGET OpenTuneStandalone_Standalone POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:OpenTuneStandalone_Standalone>/models"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${HIFIGAN_MODEL_COMMUNITY}"
+            "$<TARGET_FILE_DIR:OpenTuneStandalone_Standalone>/models/hifigan.onnx"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${FCPE_MODEL}"
+            "$<TARGET_FILE_DIR:OpenTuneStandalone_Standalone>/models/fcpe.onnx"
+        COMMENT "Copying AI models to Standalone..."
+    )
+
+    add_custom_command(TARGET OpenTuneStandalone_Standalone POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:OpenTuneStandalone_Standalone>/Demo"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/Demo.otproj"
+            "$<TARGET_FILE_DIR:OpenTuneStandalone_Standalone>/Demo/Demo.otproj"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${OPENTUNE_DEMO_AUDIO}"
+            "$<TARGET_FILE_DIR:OpenTuneStandalone_Standalone>/Demo/Demo.wav"
+        COMMENT "Copying the demo project alongside the Standalone executable..."
     )
 else()
     add_custom_command(TARGET OpenTuneStandalone_Standalone POST_BUILD
@@ -1640,6 +1814,44 @@ if(TARGET OpenTune_VST3)
                 "$<TARGET_BUNDLE_DIR:OpenTune_VST3>/Contents/Resources/docs/UserGuide_es.html"
             COMMENT "Copying UserGuide translations to VST3 bundle Resources..."
         )
+
+    elseif(OPENTUNE_LINUX)
+        # ONNX Runtime shared libs + CUDA providers → Contents/x86_64-linux/
+        # (next to OpenTune.so; resolved via the $ORIGIN rpath),
+        # AI models → Contents/Resources/models/.
+        # On Linux the JUCE VST3 target is not a CMake BUNDLE, so the bundle
+        # layout is expressed relative to the deployed .so:
+        #   TARGET_FILE_DIR = OpenTune.vst3/Contents/x86_64-linux
+        add_custom_command(TARGET OpenTune_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${ONNXRUNTIME_SHARED_LIB}"
+                "$<TARGET_FILE_DIR:OpenTune_VST3>/libonnxruntime.so.${OPENTUNE_ONNXRUNTIME_VERSION}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${ONNXRUNTIME_PROVIDERS_SHARED}"
+                "$<TARGET_FILE_DIR:OpenTune_VST3>/"
+            COMMENT "Copying ONNX Runtime shared libraries to VST3 plugin..."
+        )
+
+        if(OPENTUNE_CUDA_PROVIDERS_BUNDLED)
+            add_custom_command(TARGET OpenTune_VST3 POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${ONNXRUNTIME_PROVIDERS_CUDA}"
+                    "$<TARGET_FILE_DIR:OpenTune_VST3>/"
+                COMMENT "Copying ONNX Runtime CUDA provider to VST3 plugin..."
+            )
+        endif()
+
+        add_custom_command(TARGET OpenTune_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:OpenTune_VST3>/../Resources/models"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${HIFIGAN_MODEL_COMMUNITY}"
+                "$<TARGET_FILE_DIR:OpenTune_VST3>/../Resources/models/hifigan.onnx"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${FCPE_MODEL}"
+                "$<TARGET_FILE_DIR:OpenTune_VST3>/../Resources/models/fcpe.onnx"
+            COMMENT "Copying AI models to VST3 bundle Resources..."
+        )
     endif()
 endif()
 
@@ -1669,8 +1881,13 @@ message(STATUS "Manufacturer Code: DAYA")
 message(STATUS "Plugin Code:      De77")
 message(STATUS "ONNX Runtime:     ${ONNXRUNTIME_ROOT}")
 message(STATUS "JUCE Path:        ${OPENTUNE_JUCE_DIR}")
+if(OPENTUNE_LINUX)
+    message(STATUS "GPU Acceleration: CUDA EP (runtime detection, CPU fallback)")
+endif()
 if(OPENTUNE_IOS)
     message(STATUS "Plugin Formats:   Standalone (iPadOS)")
+elseif(OPENTUNE_LINUX)
+    message(STATUS "Plugin Formats:   Standalone + VST3 (non-ARA)")
 else()
     message(STATUS "Plugin Formats:   Standalone + VST3")
 endif()

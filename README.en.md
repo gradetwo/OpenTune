@@ -37,7 +37,7 @@ AI engine: FCPE pitch extraction + PC-NSF HifiGAN vocoder (ONNX Runtime inferenc
 
 Dual-format output: Standalone executable + VST3 plugin (with ARA2 extension support)
 
-GPU-accelerated inference: Windows DirectML / macOS CoreML
+GPU-accelerated inference: Windows DirectML / macOS CoreML / Linux CUDA (NVIDIA, automatic CPU fallback)
 
 Multi-language interface: Chinese / English / Japanese / Russian / Spanish
 

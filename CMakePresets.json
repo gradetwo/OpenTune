@@ -30,6 +30,16 @@
       }
     },
     {
+      "name": "linux-vst3-ninja",
+      "displayName": "Linux Ninja Release (VST3 + Standalone, CUDA EP optional)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-linux-ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
       "name": "windows-ara-vs2022",
       "displayName": "Windows VS2022 Release Tree (ARA2 VST3)",
       "generator": "Visual Studio 17 2022",
@@ -51,6 +61,10 @@
     }
   ],
   "buildPresets": [
+    {
+      "name": "linux-vst3-release",
+      "configurePreset": "linux-vst3-ninja"
+    },
     {
       "name": "macos-universal2-ara-release",
       "configurePreset": "macos-universal2-ara-ninja"

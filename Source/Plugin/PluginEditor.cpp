@@ -898,10 +898,10 @@ ContentKey OpenTuneAudioProcessorEditor::resolveCurrentContentKey()
     return resolveCurrentContentSync().activeContentKey;
 }
 
+#if JucePlugin_Enable_ARA
 std::vector<juce::ARAPlaybackRegion*>
 OpenTuneAudioProcessorEditor::resolveContentScopeRegions() const
 {
-#if JucePlugin_Enable_ARA
     // ARA 角色分派：PlaybackRenderer 实例使用宿主分配的 regions；
     // 只有 EditorView 的实例使用宿主选择（直接选择，其次有效选择）。
     // 选择命中分配列表时排到首位，作为当前编辑目标。
@@ -924,6 +924,9 @@ OpenTuneAudioProcessorEditor::resolveContentScopeRegions() const
     }
     return regions;
 #else
+std::vector<void*>
+OpenTuneAudioProcessorEditor::resolveContentScopeRegions() const
+{
     return {};
 #endif
 }

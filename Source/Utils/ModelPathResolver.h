@@ -28,8 +28,10 @@
 #include <string>
 #include <juce_core/juce_core.h>
 
-#if defined(__APPLE__) && JucePlugin_Build_AU \
-    && !JucePlugin_Build_VST3 && !JucePlugin_Build_Standalone
+#if (defined(__APPLE__) && JucePlugin_Build_AU \
+    && !JucePlugin_Build_VST3 && !JucePlugin_Build_Standalone) \
+    || (defined(__linux__) && JucePlugin_Build_VST3 \
+    && !JucePlugin_Build_Standalone)
 #include <dlfcn.h>
 #endif
 
@@ -105,6 +107,7 @@ public:
 
         // 自带优先：模块目录（Standalone 与 VST3 bundle 随包分发）> bundle Resources；
         // macOS 追加 OpenTune.app 内置模型回退（VST3 宿主进程定位不到自身 bundle）；
+        // Linux 追加 VST3 bundle Resources 与 ~/.vst3/OpenTune.vst3 安装位置回退；
         // Program Files / ProgramData 共享安装只作兜底。
         juce::File modelsDir = moduleFile.getParentDirectory().getChildFile("models");
         if (modelsDir.isDirectory()) {
@@ -122,6 +125,26 @@ public:
         //（/Applications/OpenTune.app/Contents/Resources/models），两个产品共用同一份模型。
         modelsDir = juce::File::getSpecialLocation(juce::File::globalApplicationsDirectory)
             .getChildFile("OpenTune.app")
+            .getChildFile("Contents")
+            .getChildFile("Resources")
+            .getChildFile("models");
+        if (modelsDir.isDirectory()) {
+            return modelsDir.getFullPathName().toStdString();
+        }
+#endif
+
+#if defined(__linux__)
+        // Linux VST3 bundle 布局 OpenTune.vst3/Contents/{x86_64-linux,Resources}：
+        // dladdr 得到 Contents/x86_64-linux/OpenTune.so，Resources 在上两级。
+        modelsDir = moduleFile.getParentDirectory().getParentDirectory()
+            .getChildFile("Resources").getChildFile("models");
+        if (modelsDir.isDirectory()) {
+            return modelsDir.getFullPathName().toStdString();
+        }
+
+        modelsDir = juce::File::getSpecialLocation(juce::File::userHomeDirectory)
+            .getChildFile(".vst3")
+            .getChildFile("OpenTune.vst3")
             .getChildFile("Contents")
             .getChildFile("Resources")
             .getChildFile("models");
@@ -187,8 +210,12 @@ private:
                 return juce::File(path);
             }
         }
-#elif defined(__APPLE__) && JucePlugin_Build_AU \
-    && !JucePlugin_Build_VST3 && !JucePlugin_Build_Standalone
+#elif (defined(__APPLE__) && JucePlugin_Build_AU \
+    && !JucePlugin_Build_VST3 && !JucePlugin_Build_Standalone) \
+    || (defined(__linux__) && JucePlugin_Build_VST3 \
+    && !JucePlugin_Build_Standalone)
+        // Linux VST3: the plugin runs inside the host process, so the module
+        // file (not the executable) anchors the bundle-relative model search.
         Dl_info moduleInfo {};
         if (::dladdr(reinterpret_cast<const void*>(&ModelPathResolver::getModelsDirectory), &moduleInfo) != 0
                 && moduleInfo.dli_fname != nullptr) {

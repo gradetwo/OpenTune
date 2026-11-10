@@ -9,6 +9,21 @@ namespace OpenTune {
 
 namespace {
 
+// GCC/Itanium ABI: int64_t == long while juce::int64 == long long, so
+// `static_cast<int64_t>(var)` and `var(int64_t)` are ambiguous between the
+// int/int64 operator and ctor pairs. These helpers route every conversion
+// through juce::int64 explicitly, which makes each step an exact match.
+inline juce::var toVar (std::int64_t value)
+{
+    return juce::var (static_cast<juce::int64> (value));
+}
+
+inline std::int64_t toInt64 (const juce::var& value)
+{
+    return static_cast<std::int64_t> (static_cast<juce::int64> (value));
+}
+
+
 std::vector<AutomationPoint> automationPointsFromValueTree(const juce::ValueTree& tree)
 {
     std::vector<AutomationPoint> points;
@@ -292,7 +307,7 @@ juce::ValueTree ProjectPersistence::settingsToValueTree(const ProjectSettings& s
     tree.setProperty("timeSignatureNumerator", settings.timeSignatureNumerator, nullptr);
     tree.setProperty("timeSignatureDenominator", settings.timeSignatureDenominator, nullptr);
     tree.setProperty("selectedTrackId", settings.selectedTrackId, nullptr);
-    tree.setProperty("selectedPlacementId", static_cast<int64_t>(settings.selectedPlacementId), nullptr);
+    tree.setProperty("selectedPlacementId", toVar(settings.selectedPlacementId), nullptr);
     tree.setProperty("activeTrackId", settings.activeTrackId, nullptr);
     tree.setProperty("scrollX", settings.scrollX, nullptr);
     tree.setProperty("scrollY", settings.scrollY, nullptr);
@@ -311,7 +326,7 @@ ProjectSettings ProjectPersistence::settingsFromValueTree(const juce::ValueTree&
     s.timeSignatureNumerator = static_cast<int>(tree.getProperty("timeSignatureNumerator", 4));
     s.timeSignatureDenominator = static_cast<int>(tree.getProperty("timeSignatureDenominator", 4));
     s.selectedTrackId = static_cast<int>(tree.getProperty("selectedTrackId", 0));
-    s.selectedPlacementId = static_cast<uint64_t>(static_cast<int64_t>(tree.getProperty("selectedPlacementId", 0)));
+    s.selectedPlacementId = static_cast<uint64_t>(toInt64(tree.getProperty("selectedPlacementId", 0)));
     s.activeTrackId = static_cast<int>(tree.getProperty("activeTrackId", 0));
     s.scrollX = tree.getProperty("scrollX", 0.0);
     s.scrollY = tree.getProperty("scrollY", 0.0);
@@ -329,32 +344,32 @@ ProjectSettings ProjectPersistence::settingsFromValueTree(const juce::ValueTree&
 juce::ValueTree ProjectPersistence::sourceToValueTree(const ProjectSourceEntry& source)
 {
     juce::ValueTree tree("Source");
-    tree.setProperty("sourceId", static_cast<int64_t>(source.sourceId), nullptr);
+    tree.setProperty("sourceId", toVar(source.sourceId), nullptr);
     setOptionalProperty(tree, "displayName", source.displayName);
     setOptionalProperty(tree, "originalImportPath", source.originalImportPath);
     setOptionalProperty(tree, "relativeMediaPath", source.relativeMediaPath);
     tree.setProperty("sampleRate", source.sampleRate, nullptr);
     tree.setProperty("numChannels", source.numChannels, nullptr);
-    tree.setProperty("lengthSamples", static_cast<int64_t>(source.lengthSamples), nullptr);
+    tree.setProperty("lengthSamples", toVar(source.lengthSamples), nullptr);
     tree.setProperty("lengthSeconds", source.lengthSeconds, nullptr);
     setOptionalProperty(tree, "contentHash", source.contentHash);
-    tree.setProperty("fileSizeBytes", static_cast<int64_t>(source.fileSizeBytes), nullptr);
+    tree.setProperty("fileSizeBytes", toVar(source.fileSizeBytes), nullptr);
     return tree;
 }
 
 ProjectSourceEntry ProjectPersistence::sourceFromValueTree(const juce::ValueTree& tree)
 {
     ProjectSourceEntry s;
-    s.sourceId = static_cast<uint64_t>(static_cast<int64_t>(tree.getProperty("sourceId", 0)));
+    s.sourceId = static_cast<uint64_t>(toInt64(tree.getProperty("sourceId", 0)));
     s.displayName = getOptionalProperty(tree, "displayName", "");
     s.originalImportPath = getOptionalProperty(tree, "originalImportPath", "");
     s.relativeMediaPath = getOptionalProperty(tree, "relativeMediaPath", "");
     s.sampleRate = tree.getProperty("sampleRate", 0.0);
     s.numChannels = static_cast<int>(tree.getProperty("numChannels", 0));
-    s.lengthSamples = static_cast<int64_t>(tree.getProperty("lengthSamples", 0));
+    s.lengthSamples = toInt64(tree.getProperty("lengthSamples", 0));
     s.lengthSeconds = tree.getProperty("lengthSeconds", 0.0);
     s.contentHash = getOptionalProperty(tree, "contentHash", "");
-    s.fileSizeBytes = static_cast<int64_t>(tree.getProperty("fileSizeBytes", 0));
+    s.fileSizeBytes = toInt64(tree.getProperty("fileSizeBytes", 0));
     return s;
 }
 
@@ -366,17 +381,17 @@ juce::ValueTree ProjectPersistence::contentToValueTree(const ProjectContentEntry
 {
     juce::ValueTree tree("Content");
     tree.setProperty("contentDomain", static_cast<int>(mat.contentKey.domainKind), nullptr);
-    tree.setProperty("contentObjectId", static_cast<int64_t>(mat.contentKey.objectId), nullptr);
-    tree.setProperty("contentDiscriminator", static_cast<int64_t>(mat.contentKey.sourceWindowDiscriminator), nullptr);
-    tree.setProperty("sourceId", static_cast<int64_t>(mat.sourceId), nullptr);
+    tree.setProperty("contentObjectId", toVar(mat.contentKey.objectId), nullptr);
+    tree.setProperty("contentDiscriminator", toVar(mat.contentKey.sourceWindowDiscriminator), nullptr);
+    tree.setProperty("sourceId", toVar(mat.sourceId), nullptr);
     tree.setProperty("retired", mat.retired ? 1 : 0, nullptr);
     tree.setProperty("lineageParentDomain", static_cast<int>(mat.lineageParentContentKey.domainKind), nullptr);
-    tree.setProperty("lineageParentObjectId", static_cast<int64_t>(mat.lineageParentContentKey.objectId), nullptr);
-    tree.setProperty("lineageParentDiscriminator", static_cast<int64_t>(mat.lineageParentContentKey.sourceWindowDiscriminator), nullptr);
+    tree.setProperty("lineageParentObjectId", toVar(mat.lineageParentContentKey.objectId), nullptr);
+    tree.setProperty("lineageParentDiscriminator", toVar(mat.lineageParentContentKey.sourceWindowDiscriminator), nullptr);
 
     // SourceWindow
     juce::ValueTree swTree("SourceWindow");
-    swTree.setProperty("sourceId", static_cast<int64_t>(mat.sourceWindow.sourceId), nullptr);
+    swTree.setProperty("sourceId", toVar(mat.sourceWindow.sourceId), nullptr);
     swTree.setProperty("sourceStartSeconds", mat.sourceWindow.sourceStartSeconds, nullptr);
     swTree.setProperty("sourceEndSeconds", mat.sourceWindow.sourceEndSeconds, nullptr);
     tree.addChild(swTree, -1, nullptr);
@@ -430,18 +445,18 @@ ProjectContentEntry ProjectPersistence::contentFromValueTree(const juce::ValueTr
 {
     ProjectContentEntry m;
     m.contentKey.domainKind = static_cast<DomainKind>(static_cast<int>(tree.getProperty("contentDomain", 0)));
-    m.contentKey.objectId = static_cast<uint64_t>(static_cast<int64_t>(tree.getProperty("contentObjectId", 0)));
-    m.contentKey.sourceWindowDiscriminator = static_cast<uint64_t>(static_cast<int64_t>(tree.getProperty("contentDiscriminator", 0)));
-    m.sourceId = static_cast<uint64_t>(static_cast<int64_t>(tree.getProperty("sourceId", 0)));
+    m.contentKey.objectId = static_cast<uint64_t>(toInt64(tree.getProperty("contentObjectId", 0)));
+    m.contentKey.sourceWindowDiscriminator = static_cast<uint64_t>(toInt64(tree.getProperty("contentDiscriminator", 0)));
+    m.sourceId = static_cast<uint64_t>(toInt64(tree.getProperty("sourceId", 0)));
     m.retired = static_cast<int>(tree.getProperty("retired", 0)) != 0;
     m.lineageParentContentKey.domainKind = static_cast<DomainKind>(static_cast<int>(tree.getProperty("lineageParentDomain", 0)));
-    m.lineageParentContentKey.objectId = static_cast<uint64_t>(static_cast<int64_t>(tree.getProperty("lineageParentObjectId", 0)));
-    m.lineageParentContentKey.sourceWindowDiscriminator = static_cast<uint64_t>(static_cast<int64_t>(tree.getProperty("lineageParentDiscriminator", 0)));
+    m.lineageParentContentKey.objectId = static_cast<uint64_t>(toInt64(tree.getProperty("lineageParentObjectId", 0)));
+    m.lineageParentContentKey.sourceWindowDiscriminator = static_cast<uint64_t>(toInt64(tree.getProperty("lineageParentDiscriminator", 0)));
 
     // SourceWindow
     auto swTree = tree.getChildWithName("SourceWindow");
     if (swTree.isValid()) {
-        m.sourceWindow.sourceId = static_cast<uint64_t>(static_cast<int64_t>(swTree.getProperty("sourceId", 0)));
+        m.sourceWindow.sourceId = static_cast<uint64_t>(toInt64(swTree.getProperty("sourceId", 0)));
         m.sourceWindow.sourceStartSeconds = swTree.getProperty("sourceStartSeconds", 0.0);
         m.sourceWindow.sourceEndSeconds = swTree.getProperty("sourceEndSeconds", 0.0);
     }
@@ -749,7 +764,7 @@ juce::ValueTree ProjectPersistence::timeGridToValueTree(const ProjectContentEntr
     juce::ValueTree tree("TimeGrid");
     for (const auto& handle : tg.handles) {
         juce::ValueTree ht("Handle");
-        ht.setProperty("id", static_cast<int64_t>(handle.id), nullptr);
+        ht.setProperty("id", toVar(handle.id), nullptr);
         ht.setProperty("kind", static_cast<int>(handle.kind), nullptr);
         ht.setProperty("sourceSeconds", handle.sourceSeconds, nullptr);
         ht.setProperty("outputSeconds", handle.outputSeconds, nullptr);
@@ -767,7 +782,7 @@ ProjectContentEntry::TimeGridEntry ProjectPersistence::timeGridFromValueTree(con
         auto child = tree.getChild(i);
         if (!child.hasType("Handle")) { continue; }
         ProjectContentEntry::TimeGridEntry::HandleEntry h;
-        h.id = static_cast<uint64_t>(static_cast<int64_t>(child.getProperty("id", 0)));
+        h.id = static_cast<uint64_t>(toInt64(child.getProperty("id", 0)));
         h.kind = static_cast<uint8_t>(static_cast<int>(child.getProperty("kind", 0)));
         h.sourceSeconds = child.getProperty("sourceSeconds", 0.0);
         h.outputSeconds = child.getProperty("outputSeconds", 0.0);
@@ -821,10 +836,10 @@ juce::ValueTree ProjectPersistence::placementsToValueTree(const std::vector<Proj
     juce::ValueTree tree("Placements");
     for (const auto& p : placements) {
         juce::ValueTree pt("Placement");
-        pt.setProperty("placementId", static_cast<int64_t>(p.placementId), nullptr);
+        pt.setProperty("placementId", toVar(p.placementId), nullptr);
         pt.setProperty("contentDomain", static_cast<int>(p.contentKey.domainKind), nullptr);
-        pt.setProperty("contentObjectId", static_cast<int64_t>(p.contentKey.objectId), nullptr);
-        pt.setProperty("contentDiscriminator", static_cast<int64_t>(p.contentKey.sourceWindowDiscriminator), nullptr);
+        pt.setProperty("contentObjectId", toVar(p.contentKey.objectId), nullptr);
+        pt.setProperty("contentDiscriminator", toVar(p.contentKey.sourceWindowDiscriminator), nullptr);
         pt.setProperty("timelineStartSeconds", p.timelineStartSeconds, nullptr);
         pt.setProperty("timelineDurationSeconds", p.timelineDurationSeconds, nullptr);
         pt.setProperty("clipGain", p.clipGain, nullptr);
@@ -845,10 +860,10 @@ std::vector<ProjectPlacementEntry> ProjectPersistence::placementsFromValueTree(c
         auto child = tree.getChild(i);
         if (!child.hasType("Placement")) { continue; }
         ProjectPlacementEntry p;
-        p.placementId = static_cast<uint64_t>(static_cast<int64_t>(child.getProperty("placementId", 0)));
+        p.placementId = static_cast<uint64_t>(toInt64(child.getProperty("placementId", 0)));
         p.contentKey.domainKind = static_cast<DomainKind>(static_cast<int>(child.getProperty("contentDomain", 0)));
-        p.contentKey.objectId = static_cast<uint64_t>(static_cast<int64_t>(child.getProperty("contentObjectId", 0)));
-        p.contentKey.sourceWindowDiscriminator = static_cast<uint64_t>(static_cast<int64_t>(child.getProperty("contentDiscriminator", 0)));
+        p.contentKey.objectId = static_cast<uint64_t>(toInt64(child.getProperty("contentObjectId", 0)));
+        p.contentKey.sourceWindowDiscriminator = static_cast<uint64_t>(toInt64(child.getProperty("contentDiscriminator", 0)));
         p.timelineStartSeconds = child.getProperty("timelineStartSeconds", 0.0);
         p.timelineDurationSeconds = child.getProperty("timelineDurationSeconds", 0.0);
         p.clipGain = static_cast<float>(child.getProperty("clipGain", 1.0));
@@ -869,8 +884,8 @@ juce::ValueTree ProjectPersistence::silentGapsToValueTree(const std::vector<Proj
     juce::ValueTree tree("SilentGaps");
     for (const auto& gap : gaps) {
         juce::ValueTree gt("SilentGap");
-        gt.setProperty("startSample", static_cast<int64_t>(gap.startSample), nullptr);
-        gt.setProperty("endSampleExclusive", static_cast<int64_t>(gap.endSampleExclusive), nullptr);
+        gt.setProperty("startSample", toVar(gap.startSample), nullptr);
+        gt.setProperty("endSampleExclusive", toVar(gap.endSampleExclusive), nullptr);
         gt.setProperty("minLevel_dB", gap.minLevel_dB, nullptr);
         tree.addChild(gt, -1, nullptr);
     }
@@ -885,8 +900,8 @@ std::vector<ProjectContentEntry::SilentGapEntry> ProjectPersistence::silentGapsF
         auto child = tree.getChild(i);
         if (!child.hasType("SilentGap")) { continue; }
         ProjectContentEntry::SilentGapEntry gap;
-        gap.startSample = static_cast<int64_t>(child.getProperty("startSample", 0));
-        gap.endSampleExclusive = static_cast<int64_t>(child.getProperty("endSampleExclusive", 0));
+        gap.startSample = toInt64(child.getProperty("startSample", 0));
+        gap.endSampleExclusive = toInt64(child.getProperty("endSampleExclusive", 0));
         gap.minLevel_dB = child.getProperty("minLevel_dB", 0.0f);
         gaps.push_back(gap);
     }
@@ -903,7 +918,7 @@ juce::ValueTree ProjectPersistence::referenceFeaturesToValueTree(const ProjectCo
     tree.setProperty("analysisRevision", rf.analysisRevision, nullptr);
     tree.setProperty("status", static_cast<int>(rf.status), nullptr);
     tree.setProperty("producer", static_cast<int>(rf.producer), nullptr);
-    tree.setProperty("inputFingerprint", static_cast<int64_t>(rf.inputFingerprint), nullptr);
+    tree.setProperty("inputFingerprint", toVar(rf.inputFingerprint), nullptr);
     tree.setProperty("sourceDurationSeconds", rf.sourceDurationSeconds, nullptr);
     setOptionalProperty(tree, "errorMessage", rf.errorMessage);
 
@@ -917,7 +932,7 @@ juce::ValueTree ProjectPersistence::referenceFeaturesToValueTree(const ProjectCo
         juce::ValueTree taTree("TimingAnchors");
         for (const auto& anchor : rf.timingAnchors) {
             juce::ValueTree at("TimingAnchor");
-            at.setProperty("anchorId", static_cast<int64_t>(anchor.anchorId), nullptr);
+            at.setProperty("anchorId", toVar(anchor.anchorId), nullptr);
             at.setProperty("sourceSeconds", anchor.sourceSeconds, nullptr);
             at.setProperty("strength", anchor.strength, nullptr);
             at.setProperty("kind", static_cast<int>(anchor.kind), nullptr);
@@ -938,7 +953,7 @@ ProjectContentEntry::ReferenceFeatureEntry ProjectPersistence::referenceFeatures
     rf.analysisRevision = static_cast<int>(tree.getProperty("analysisRevision", 0));
     rf.status = static_cast<uint8_t>(static_cast<int>(tree.getProperty("status", 0)));
     rf.producer = static_cast<uint8_t>(static_cast<int>(tree.getProperty("producer", 0)));
-    rf.inputFingerprint = static_cast<int64_t>(tree.getProperty("inputFingerprint", 0));
+    rf.inputFingerprint = toInt64(tree.getProperty("inputFingerprint", 0));
     rf.sourceDurationSeconds = tree.getProperty("sourceDurationSeconds", 0.0);
     rf.errorMessage = getOptionalProperty(tree, "errorMessage", "");
 
@@ -952,7 +967,7 @@ ProjectContentEntry::ReferenceFeatureEntry ProjectPersistence::referenceFeatures
             auto child = taTree.getChild(i);
             if (!child.hasType("TimingAnchor")) { continue; }
             ProjectContentEntry::ReferenceFeatureEntry::TimingAnchorEntry anchor;
-            anchor.anchorId = static_cast<uint64_t>(static_cast<int64_t>(child.getProperty("anchorId", 0)));
+            anchor.anchorId = static_cast<uint64_t>(toInt64(child.getProperty("anchorId", 0)));
             anchor.sourceSeconds = child.getProperty("sourceSeconds", 0.0);
             anchor.strength = child.getProperty("strength", 0.0f);
             anchor.kind = static_cast<uint8_t>(static_cast<int>(child.getProperty("kind", 0)));

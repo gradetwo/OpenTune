@@ -37,7 +37,7 @@ AI 引擎：FCPE 音高提取 + PC-NSF HifiGAN 声码器（ONNX Runtime 推理�
 
 双格式输出：Standalone 独立运行 + VST3 插件（支持 ARA2 扩展）
 
-GPU 加速推理：Windows DirectML / macOS CoreML
+GPU 加速推理：Windows DirectML / macOS CoreML / Linux CUDA（NVIDIA，自动 CPU 回退）
 
 多语言界面：中 / 英 / 日 / 俄 / 西
 

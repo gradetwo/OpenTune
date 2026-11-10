@@ -1,4 +1,6 @@
 function(opentune_use_juce_vst3_client_ara_legacy_bind_overlay juce_root)
+    cmake_parse_arguments(OPENTUNE_OVERLAY "SKIP_ARA_PATCH" "" "" ${ARGN})
+
     if(NOT TARGET juce_audio_plugin_client_VST3)
         message(FATAL_ERROR
             "JUCE VST3 wrapper target is not available. Call "
@@ -103,6 +105,11 @@ function(opentune_use_juce_vst3_client_ara_legacy_bind_overlay juce_root)
     endif()
 
     # ---- Patch 2: ARA 1.x legacy bind -------------------------------------------
+    # Skipped on Linux builds without the ARA extension: the ARA entry point
+    # only exists when the plugin is built with IS_ARA_EFFECT TRUE.
+    if(OPENTUNE_OVERLAY_SKIP_ARA_PATCH)
+        message(STATUS "OpenTune JUCE VST3 client overlay: skipping ARA legacy-bind patch (non-ARA build)")
+    else()
     set(ara_patched_needle
         "return bindToDocumentControllerWithRoles (controllerRef, 0, 0);")
     string(FIND "${vst3_client_source}" "${ara_patched_needle}" ara_patched_pos)
@@ -144,6 +151,7 @@ function(opentune_use_juce_vst3_client_ara_legacy_bind_overlay juce_root)
             string(REPLACE "${ara_upstream_snippet}" "${ara_patched_snippet}"
                    vst3_client_source "${vst3_client_source}")
         endif()
+    endif()
     endif()
 
     # ---- Patch 3: host-active buses when the host skips activateBus -------------

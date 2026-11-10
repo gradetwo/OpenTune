@@ -155,7 +155,11 @@ private:
     void applyThemeToEditor(ThemeId themeId);
     ContentKey resolveCurrentContentKey();
     PianoRollContentSync resolveCurrentContentSync();
+#if JucePlugin_Enable_ARA
     std::vector<juce::ARAPlaybackRegion*> resolveContentScopeRegions() const;
+#else
+    std::vector<void*> resolveContentScopeRegions() const;
+#endif
     void readScopeAudio();
     void syncParameterPanelFromSelection();
     PianoRollContentSync syncContentProjectionToPianoRoll();

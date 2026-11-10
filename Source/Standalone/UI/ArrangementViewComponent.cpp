@@ -1239,7 +1239,7 @@ void ArrangementViewComponent::prepareCoverageCompositeTiles()
     const auto fgSig = makeForegroundSignature();
     const double tileDuration = TimelineCompositeCache::kTileWidthPx / bgSig.pixelsPerSecond;
 
-    const int64_t firstTimeTile = std::max(0LL,
+    const int64_t firstTimeTile = std::max(static_cast<int64_t>(0),
         static_cast<int64_t>(std::floor(tileCoverageStartSeconds_ / tileDuration)));
     const int64_t lastTimeTile = static_cast<int64_t>(
         std::floor((tileCoverageEndSeconds_ - 1e-9) / tileDuration));
